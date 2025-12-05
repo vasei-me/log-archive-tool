@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Log Archive Tool - A CLI tool to compress and archive log files
+Log Archive Tool - Advanced version with filtering and progress bar
 """
 
 import os
@@ -9,14 +9,18 @@ import tarfile
 import argparse
 import datetime
 import logging
+import fnmatch
 from pathlib import Path
 import shutil
 import platform
+from tqdm import tqdm  # برای progress bar
+import time
 
-def setup_logging():
+def setup_logging(verbose=False):
     """Setup logging configuration"""
+    level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.FileHandler('log_archive_tool.log'),
@@ -51,8 +55,30 @@ def create_archive_name():
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     return f"logs_archive_{timestamp}.tar.gz"
 
-def compress_logs(log_directory, archive_name):
-    """Compress the log directory into a tar.gz file"""
+def should_include_file(file_path, include_pattern, exclude_pattern):
+    """Check if file should be included based on patterns"""
+    filename = os.path.basename(file_path)
+    
+    # Check exclude pattern first
+    if exclude_pattern:
+        exclude_patterns = [p.strip() for p in exclude_pattern.split(',')]
+        for pattern in exclude_patterns:
+            if pattern and fnmatch.fnmatch(filename, pattern):
+                return False
+    
+    # Check include pattern
+    if include_pattern:
+        include_patterns = [p.strip() for p in include_pattern.split(',')]
+        for pattern in include_patterns:
+            if pattern and fnmatch.fnmatch(filename, pattern):
+                return True
+        return False
+    
+    return True
+
+def compress_logs(log_directory, archive_name, include_pattern=None, exclude_pattern=None, 
+                  remove_after_archive=False, verbose=False):
+    """Compress the log directory into a tar.gz file with optional filtering"""
     try:
         # Create archive directory if it doesn't exist
         archive_dir = Path("archived_logs")
@@ -60,29 +86,82 @@ def compress_logs(log_directory, archive_name):
         
         archive_path = archive_dir / archive_name
         
-        # Normalize paths for Windows
+        # Normalize paths
         log_dir_str = str(log_directory)
         
-        # Create tar.gz archive
-        with tarfile.open(archive_path, "w:gz") as tar:
-            tar.add(log_dir_str, arcname=os.path.basename(log_dir_str))
+        # Get list of files to include
+        files_to_archive = []
+        total_size = 0
         
-        return archive_path
+        for root, dirs, files in os.walk(log_dir_str):
+            for file in files:
+                file_path = os.path.join(root, file)
+                if should_include_file(file_path, include_pattern, exclude_pattern):
+                    files_to_archive.append(file_path)
+                    total_size += os.path.getsize(file_path)
+        
+        if not files_to_archive:
+            raise Exception(f"No files found matching pattern '{include_pattern}'")
+        
+        # Create tar.gz archive with progress bar
+        if verbose:
+            print(f"\nArchiving {len(files_to_archive)} files ({total_size / (1024*1024):.2f} MB)...")
+        
+        with tarfile.open(archive_path, "w:gz") as tar:
+            if verbose:
+                # With progress bar
+                with tqdm(total=len(files_to_archive), desc="Creating archive", unit="file") as pbar:
+                    for file_path in files_to_archive:
+                        arcname = os.path.relpath(file_path, log_dir_str)
+                        tar.add(file_path, arcname=arcname)
+                        pbar.update(1)
+            else:
+                # Without progress bar
+                for file_path in files_to_archive:
+                    arcname = os.path.relpath(file_path, log_dir_str)
+                    tar.add(file_path, arcname=arcname)
+        
+        # Remove original files if requested
+        removed_files = []
+        if remove_after_archive:
+            if verbose:
+                print("\nRemoving original files...")
+            
+            for file_path in files_to_archive:
+                try:
+                    os.remove(file_path)
+                    removed_files.append(file_path)
+                except Exception as e:
+                    logging.warning(f"Could not remove {file_path}: {e}")
+        
+        return archive_path, len(files_to_archive), total_size, removed_files
+        
     except Exception as e:
         raise Exception(f"Failed to create archive: {str(e)}")
 
-def log_archive_operation(archive_path, log_directory, archive_log_file="archive_log.txt"):
+def log_archive_operation(archive_path, log_directory, files_archived, total_size, 
+                          removed_files, archive_log_file="archive_log.txt"):
     """Log the archive operation details"""
     try:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         archive_size = os.path.getsize(archive_path) if os.path.exists(archive_path) else 0
         archive_size_mb = archive_size / (1024 * 1024)  # Convert to MB
+        original_size_mb = total_size / (1024 * 1024) if total_size > 0 else 0
+        
+        if original_size_mb > 0:
+            compression_ratio = ((original_size_mb - archive_size_mb) / original_size_mb) * 100
+        else:
+            compression_ratio = 0
         
         log_entry = (
             f"Timestamp: {timestamp}\n"
             f"Original Directory: {log_directory}\n"
+            f"Files Archived: {files_archived}\n"
+            f"Original Size: {original_size_mb:.2f} MB\n"
             f"Archive: {archive_path}\n"
             f"Archive Size: {archive_size_mb:.2f} MB\n"
+            f"Compression Ratio: {compression_ratio:.1f}%\n"
+            f"Files Removed: {len(removed_files)}\n"
             f"{'='*50}\n"
         )
         
@@ -94,23 +173,25 @@ def log_archive_operation(archive_path, log_directory, archive_log_file="archive
     except Exception as e:
         raise Exception(f"Failed to log archive operation: {str(e)}")
 
-def get_directory_size(directory):
-    """Calculate total size of directory in bytes"""
+def get_directory_size(directory, include_pattern=None, exclude_pattern=None):
+    """Calculate total size of directory in bytes with filtering"""
     total_size = 0
     for dirpath, dirnames, filenames in os.walk(directory):
         for filename in filenames:
             filepath = os.path.join(dirpath, filename)
-            if os.path.isfile(filepath):
-                total_size += os.path.getsize(filepath)
+            if should_include_file(filepath, include_pattern, exclude_pattern):
+                if os.path.isfile(filepath):
+                    total_size += os.path.getsize(filepath)
     return total_size
 
-def list_log_files(log_directory):
-    """List all log files in the directory"""
+def list_log_files(log_directory, include_pattern=None, exclude_pattern=None):
+    """List all log files in the directory with filtering"""
     log_files = []
     for root, dirs, files in os.walk(log_directory):
         for file in files:
-            if file.endswith('.log') or 'log' in file.lower():
-                log_files.append(os.path.join(root, file))
+            filepath = os.path.join(root, file)
+            if should_include_file(filepath, include_pattern, exclude_pattern):
+                log_files.append(filepath)
     return log_files
 
 def get_windows_logs_directory():
@@ -121,7 +202,7 @@ def get_windows_logs_directory():
 def main():
     # Setup argument parser
     parser = argparse.ArgumentParser(
-        description="Log Archive Tool - Compress and archive log files"
+        description="Log Archive Tool - Advanced version with filtering options"
     )
     parser.add_argument(
         "log_directory",
@@ -141,7 +222,7 @@ def main():
     )
     parser.add_argument(
         "-v", "--verbose",
-        help="Increase output verbosity",
+        help="Increase output verbosity and show progress bar",
         action="store_true"
     )
     parser.add_argument(
@@ -149,11 +230,31 @@ def main():
         help="Use default Windows logs directory",
         action="store_true"
     )
+    parser.add_argument(
+        "--pattern",
+        help="Pattern to include files (e.g., '*.log', 'error_*', '*.log,*.txt')",
+        default=None
+    )
+    parser.add_argument(
+        "--exclude",
+        help="Pattern to exclude files (e.g., 'debug_*', 'temp*', '*.tmp,*.bak')",
+        default=None
+    )
+    parser.add_argument(
+        "--remove-after-archive",
+        help="Remove original files after successful archiving",
+        action="store_true"
+    )
+    parser.add_argument(
+        "--list-only",
+        help="Only list files that would be archived (dry run)",
+        action="store_true"
+    )
     
     args = parser.parse_args()
     
     # Setup logger
-    logger = setup_logging()
+    logger = setup_logging(args.verbose)
     
     # Determine log directory
     if args.windows_logs:
@@ -170,22 +271,42 @@ def main():
         logger.info(f"Starting log archive process for: {log_directory}")
         logger.info(f"Operating System: {platform.system()} {platform.release()}")
         
+        # Display pattern info
+        if args.pattern:
+            logger.info(f"Include pattern: {args.pattern}")
+        if args.exclude:
+            logger.info(f"Exclude pattern: {args.exclude}")
+        if args.remove_after_archive:
+            logger.info("Will remove original files after archiving")
+        
         # Validate directory
         log_dir = validate_directory(log_directory)
         logger.info(f"Directory validated: {log_dir}")
         
-        # Get directory info
-        dir_size = get_directory_size(log_dir)
+        # Get directory info with filtering
+        dir_size = get_directory_size(log_dir, args.pattern, args.exclude)
         dir_size_mb = dir_size / (1024 * 1024)
-        log_files = list_log_files(log_dir)
+        log_files = list_log_files(log_dir, args.pattern, args.exclude)
         
-        logger.info(f"Directory size: {dir_size_mb:.2f} MB")
-        logger.info(f"Number of log files found: {len(log_files)}")
+        logger.info(f"Directory size (filtered): {dir_size_mb:.2f} MB")
+        logger.info(f"Number of log files found (filtered): {len(log_files)}")
+        
+        # List only mode
+        if args.list_only:
+            logger.info("=== FILES TO BE ARCHIVED ===")
+            for i, log_file in enumerate(log_files[:50], 1):  # Show first 50 files
+                size_mb = os.path.getsize(log_file) / (1024 * 1024)
+                logger.info(f"{i:3d}. {log_file} ({size_mb:.2f} MB)")
+            if len(log_files) > 50:
+                logger.info(f"... and {len(log_files) - 50} more files")
+            logger.info("=== END LIST ===")
+            return
         
         if args.verbose and log_files:
-            logger.info("Log files found:")
+            logger.info("Files to be archived:")
             for log_file in log_files[:10]:  # Show first 10 files
-                logger.info(f"  - {log_file}")
+                size_mb = os.path.getsize(log_file) / (1024 * 1024)
+                logger.info(f"  - {log_file} ({size_mb:.2f} MB)")
             if len(log_files) > 10:
                 logger.info(f"  ... and {len(log_files) - 10} more")
         
@@ -197,15 +318,30 @@ def main():
         output_dir = Path(args.output_dir)
         output_dir.mkdir(exist_ok=True, parents=True)
         
-        # Compress logs
+        # Compress logs with filtering
         logger.info("Creating archive...")
-        archive_path = compress_logs(str(log_dir), archive_name)
+        archive_path, files_archived, total_size, removed_files = compress_logs(
+            str(log_dir), 
+            archive_name, 
+            args.pattern, 
+            args.exclude,
+            args.remove_after_archive,
+            args.verbose
+        )
+        
         logger.info(f"Archive created successfully: {archive_path}")
+        logger.info(f"Files archived: {files_archived}")
+        
+        if args.remove_after_archive:
+            logger.info(f"Files removed: {len(removed_files)}")
         
         # Log the operation
         log_entry = log_archive_operation(
             archive_path, 
             str(log_dir), 
+            files_archived,
+            total_size,
+            removed_files,
             args.log_file
         )
         
@@ -215,13 +351,21 @@ def main():
         compression_ratio = (1 - (archive_size / dir_size)) * 100 if dir_size > 0 else 0
         
         # Final summary
+        if args.verbose:
+            print("\n" + "=" * 60)
+            print("ARCHIVE COMPLETED SUCCESSFULLY")
+            print("=" * 60)
+        
         logger.info("=" * 50)
         logger.info("ARCHIVE COMPLETED SUCCESSFULLY")
         logger.info("=" * 50)
         logger.info(f"Original directory: {log_dir}")
-        logger.info(f"Original size: {dir_size_mb:.2f} MB")
+        logger.info(f"Original size (filtered): {dir_size_mb:.2f} MB")
+        logger.info(f"Files archived: {files_archived}")
         logger.info(f"Archive size: {archive_size_mb:.2f} MB")
         logger.info(f"Compression ratio: {compression_ratio:.1f}%")
+        if args.remove_after_archive:
+            logger.info(f"Files removed: {len(removed_files)}")
         logger.info(f"Archive saved to: {archive_path}")
         logger.info(f"Operation logged to: {args.log_file}")
         logger.info("=" * 50)

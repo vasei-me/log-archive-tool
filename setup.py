@@ -1,7 +1,7 @@
 import os
 from setuptools import setup
 
-# خواندن فایل README اگر وجود دارد
+# خواندن فایل README
 current_dir = os.path.dirname(os.path.abspath(__file__))
 readme_path = os.path.join(current_dir, "README.md")
 
@@ -12,19 +12,27 @@ else:
     long_description = "A CLI tool to compress and archive log files"
 
 setup(
-    name="log-archive-tool",
-    version="1.0.0",
-    description="A CLI tool to compress and archive log files",
+    name="log-archive-tool-advanced",
+    version="2.0.0",
+    description="An advanced CLI tool to compress and archive log files with filtering and progress bar",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="Erfan",
     author_email="your.email@example.com",
-    url="https://github.com/yourusername/log-archive-tool",
+    url="https://github.com/vasei-me/log-archive-tool",
     py_modules=["log_archive"],
-    install_requires=[],
+    install_requires=[
+        "tqdm>=4.65.0",  # برای progress bar
+    ],
+    extras_require={
+        "dev": [
+            "pytest>=7.0.0",
+        ],
+    },
     entry_points={
         'console_scripts': [
             'log-archive=log_archive:main',
+            'log-archive-advanced=log_archive:main',
         ],
     },
     classifiers=[
@@ -42,11 +50,13 @@ setup(
         "Operating System :: POSIX :: Linux",
         "Operating System :: MacOS",
         "Topic :: System :: Archiving",
+        "Topic :: System :: Logging",
         "Topic :: Utilities",
     ],
     python_requires=">=3.6",
-    keywords="log archive compression cli tar gz",
+    keywords="log archive compression cli tar gz filtering progress",
     project_urls={
-        "Source": "https://github.com/yourusername/log-archive-tool",
+        "Source": "https://github.com/vasei-me/log-archive-tool",
+        "Issues": "https://github.com/vasei-me/log-archive-tool/issues",
     },
 )
