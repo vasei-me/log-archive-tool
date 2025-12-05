@@ -1,0 +1,3 @@
+[console_scripts]
+log-archive = log_archive:main
+log-archive-advanced = log_archive:main

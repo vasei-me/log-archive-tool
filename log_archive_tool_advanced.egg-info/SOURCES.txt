@@ -1,0 +1,9 @@
+README.md
+log_archive.py
+setup.py
+log_archive_tool_advanced.egg-info/PKG-INFO
+log_archive_tool_advanced.egg-info/SOURCES.txt
+log_archive_tool_advanced.egg-info/dependency_links.txt
+log_archive_tool_advanced.egg-info/entry_points.txt
+log_archive_tool_advanced.egg-info/requires.txt
+log_archive_tool_advanced.egg-info/top_level.txt

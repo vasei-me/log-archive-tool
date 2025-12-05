@@ -1,59 +1,18 @@
-# Virtual environment
-.venv/
-venv/
-env/
-ENV/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
-
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+.pytest_cache/
+.venv/
 
 # Logs
 *.log
 archive_log.txt
-log_archive_tool.log
 
-# Archives
-archived_logs/
-final_output/
-venv_archives/
-real_logs_test/
-test_final/
+# Test directories
 test_logs/
+test_remove/
+archived_logs/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-Thumbs.db
-.DS_Store
-
-# Temp files
-*.tmp
-*.temp
+# Batch files (optional)
+log_archive.bat
+run_tests.bat
