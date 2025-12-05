@@ -1,1 +1,4 @@
-# No external dependencies required
+# requirements.txt
+# No dependencies for basic functionality
+# Optional: tqdm for progress bar (install with pip install tqdm if needed)
+tqdm>=4.65.0
